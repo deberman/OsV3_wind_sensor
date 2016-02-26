@@ -1,0 +1,7 @@
+OS_v3_windsensor	KEYWORD1
+setChannel	KEYWORD2
+setAvgWind	KEYWORD2
+setGust	KEYWORD2
+setDirection	KEYWORD2
+setBatteryStatus	KEYWORD2
+buildAndSendPacket	KEYWORD2
