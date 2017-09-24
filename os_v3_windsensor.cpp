@@ -1,19 +1,22 @@
 //Jack Christensen 19 Nov 2013
 //CC BY-SA, see http://creativecommons.org/licenses/by-sa/3.0/
 //
-// simplified and  made into an Arduino library by deberman 2016-02-22
+//I Found it here: https://github.com/epkboan/rain_sensor
 //
-// Library for simulating a Pcr800 sensor using Oregon Scientific protocol V3 
-// the packet is built with the required Pcr800 fields checksum  is calculated 
+// simplified and  made into an Arduino library
+// and  modified to simulate a windsensor by deberman 2016-02-24
+
+// Library for simulating a WGR800 sensor using Oregon Scientific protocol V3
+// the packet is built with the required WGR800 fields checksum  is calculated
 // the data is manchester encoded and sent to the transmitter
 
 #include "Arduino.h"
-#include "os_v3_rainsensor.h"
+#include "os_v3_windsensor.h"
 
-OS_v3_rainsensor::OS_v3_rainsensor(int transmitterPin)
+OS_v3_windsensor::OS_v3_windsensor(int transmitterPin)
 {
   m_transmitterPin = transmitterPin;
-  
+
   // new rolling code with every reset
   randomSeed(analogRead(1)); // analog pin one used as source of noise for random seed
   m_rollingCode = random(0x01, 0xFE);
@@ -22,66 +25,64 @@ OS_v3_rainsensor::OS_v3_rainsensor(int transmitterPin)
 }
 
 
-void OS_v3_rainsensor::setChannel(uint8_t channel)
+void OS_v3_windsensor::setChannel(uint8_t channel)
 {
   m_packet[5] |= channel;
 }
 
-void OS_v3_rainsensor::setRainRate(unsigned long rainRate)
-{ //I want to use mm but telldus conversion to mm sucks 
-  //so this is a bit moot  
+void OS_v3_windsensor::setAvgWind(unsigned int avgWind)
+{
 
-  rainRate *= 100;
-  rainRate /= 254;
-  
-  m_packet[7] |= ((rainRate) % 10);
-  m_packet[8]  = ((rainRate / 10) % 10) << 4;
-  m_packet[8] |= (rainRate / 100) % 10;
-  m_packet[9]  = ((rainRate / 1000) % 10) << 4;
+  //m_packet[10] = ((avgWind) % 10) << 4;
+  m_packet[10] |= (avgWind) % 10;
+  m_packet[11]  = ((avgWind / 10) % 10) << 4;
+  m_packet[11] |= (avgWind / 100) % 10;
+
 }
 
-void OS_v3_rainsensor::setTotalRain(unsigned long totalRain)
-{ 
+void OS_v3_windsensor::setGust(unsigned int gust)
+{
+  m_packet[9]  = (gust % 10) << 4;
+  m_packet[9] |= ((gust / 10) % 10);
+  m_packet[10] |= ((gust / 100) % 10) << 4;; // & 0xF0;
 
-  totalRain /= 0.254;//convert from mm to inch
-  
-  m_packet[9]  |= (totalRain) % 10;
-  m_packet[10]  = ((totalRain / 10) % 10) << 4;
-  m_packet[10] |= (totalRain / 100) % 10;
-  m_packet[11]  = ((totalRain / 1000) % 10) << 4;
-  m_packet[11] |= (totalRain / 10000) % 10;
-  m_packet[12]  = ((totalRain / 100000) % 10) << 4;
 }
 
-void OS_v3_rainsensor::setBatteryStatus(bool batterystatus)
+void OS_v3_windsensor::setDirection(unsigned long m_direction)
+{
+  delay(10);
+}
+
+void OS_v3_windsensor::setBatteryStatus(bool batterystatus)
 {
   if (!batterystatus)
     bitSet(m_packet[7], 6);
-    
+
   else
     bitClear(m_packet[7], 6);
 }
 
-unsigned char OS_v3_rainsensor::calcChecksum(void)
+unsigned char OS_v3_windsensor::calcChecksum(void)
 {
   unsigned char checksum = 0;
 
   checksum += m_packet[3] & 0x0F;
-  
+
   for (int i = 4; i < 12; i++)
   {
-    //flip the nibbles
     checksum += (m_packet[i] >> 4) & 0x0F;
     checksum += (m_packet[i] & 0x0F);
   }
-  
-  checksum += (m_packet[12] >> 4) & 0x0F;
-  
+
+  //checksum += (m_packet[12] >> 4) & 0x0F;
+  // nibble swap
+  return ((checksum & 0x0F) << 4) | ((checksum & 0xF0) >> 4);
+
   return checksum;
-  
+
 }
 
-void OS_v3_rainsensor::buildAndSendPacket()
+void OS_v3_windsensor::buildAndSendPacket()
 {
   // Nibbles are sent LSB first
 
@@ -95,8 +96,8 @@ void OS_v3_rainsensor::buildAndSendPacket()
   m_packet[3] = 0xA0;
 
   // nibbles 0..3 Sensor ID This 16-bit value is unique to each sensor, or sometimes a group of sensors.
-  m_packet[3] |= 0x02;
-  m_packet[4] = 0x91;
+  m_packet[3] |= 0x01;
+  m_packet[4] = 0x98;
   m_packet[5] = 0x40;
 
   // nibbles 5..6 Rolling Code Value changes randomly every time the sensor is reset
@@ -105,14 +106,13 @@ void OS_v3_rainsensor::buildAndSendPacket()
   unsigned char checksum = calcChecksum();
 
   // Checksum
-  m_packet[12]  |= checksum & 0x0F;
-  m_packet[13] = checksum & 0xF0;
+  m_packet[12] = checksum;
 
   // send the data over rf
   sendData();
 }
 
-void OS_v3_rainsensor::sendData(void)
+void OS_v3_windsensor::sendData(void)
 {
   int i;
 
@@ -120,7 +120,7 @@ void OS_v3_rainsensor::sendData(void)
   delayMicroseconds(2000);
 
   for (i = 0; i < sizeof(m_packet); i++)
-  {
+  { //original = (i + 1 == sizeof(m_packet)));
     manchesterEncode(m_packet[i], (i + 1 == sizeof(m_packet)));
   }
 
@@ -128,7 +128,7 @@ void OS_v3_rainsensor::sendData(void)
 }
 
 
-void OS_v3_rainsensor::manchesterEncode (unsigned char encodeByte, bool lastByte)
+void OS_v3_windsensor::manchesterEncode (unsigned char encodeByte, bool lastByte)
 {
   unsigned char mask = 0x10;
   int loopCount;
